@@ -1,0 +1,52 @@
+name: contract-monitor
+
+on:
+  schedule:
+    # Every 5 minutes between 11:00 and 23:55 UTC.
+    # Covers 7am-6:55pm Toronto in both EST (UTC-5) and EDT (UTC-4).
+    # The script enforces the strict 8am-6pm ET window itself.
+    - cron: "*/5 11-23 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Bypass the 8am-6pm ET window check"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: contract-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - run: python monitor.py
+        env:
+          PORTAL_EMAIL:       ${{ secrets.PORTAL_EMAIL }}
+          PORTAL_PASSWORD:    ${{ secrets.PORTAL_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE_RUN:          ${{ inputs.force && '1' || '' }}
+
+      - name: Commit state if changed
+        run: |
+          if ! git diff --quiet seen.json; then
+            git config user.name  "contract-monitor[bot]"
+            git config user.email "contract-monitor@users.noreply.github.com"
+            git add seen.json
+            git commit -m "state: update seen contracts"
+            git push
+          fi
